@@ -7,7 +7,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const username = user.user_metadata?.username ?? user.id
+  const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single()
+  const username = profile?.username ?? user.user_metadata?.username ?? user.id
 
   return (
     <div className="min-h-screen bg-bg" style={{ paddingBottom: '60px' }}>

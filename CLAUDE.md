@@ -28,3 +28,13 @@ Read alley-social.md for full product context before making any decisions.
 
 ## File structure is locked
 Do not add files outside the existing structure without explicit instruction.
+
+## Product decisions — locked
+- Block timer is final. No early cancellation. No override.
+- When a block expires, the user must re-enter their password before
+  reconnecting. This is a consent gate — not a login, not a new session.
+  It confirms the reconnection is deliberate. Modeled on GitHub's repo
+  deletion pattern. The password is the signature.
+- "Step away again" is always offered as an alternative to reconnecting.
+- Reconnect = password verified → navigate to /[username]
+- Step away again = navigate to /block/[username]

@@ -11,7 +11,7 @@ import { Profile } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Step = 'duration' | 'mutuals' | 'confirm' | 'success'
+type Step = 'duration' | 'mutuals' | 'confirm' | 'success' | 'reconfirm'
 
 const PRESETS = [
   { label: '2h', desc: '2 hours', hours: 2 },
@@ -44,7 +44,7 @@ function DurationPicker({ targetUsername, onSelect }: { targetUsername: string; 
               className="flex flex-col justify-end p-4 rounded-2xl min-h-[88px] transition-all active:scale-95"
               style={{ background: sel ? '#fff' : '#111', border: `1px solid ${sel ? '#fff' : '#222'}` }}>
               <span className="text-2xl font-semibold leading-none mb-1"
-                style={{ color: sel ? '#0a0a0a' : '#fff', letterSpacing: '-0.02em' }}>{p.label}</span>
+                style={{ color: sel ? '#0a0a0a' : '#888', letterSpacing: '-0.02em' }}>{p.label}</span>
               <span className="text-xs" style={{ color: sel ? '#666' : '#555' }}>{p.desc}</span>
             </button>
           )
@@ -54,7 +54,7 @@ function DurationPicker({ targetUsername, onSelect }: { targetUsername: string; 
         <button onClick={() => selected && onSelect(selected)} disabled={!selected}
           className="w-full py-4 rounded-2xl font-semibold text-sm transition-all active:scale-[0.98] disabled:opacity-30"
           style={{ background: selected ? '#fff' : '#222', color: selected ? '#0a0a0a' : '#555' }}>
-          {selected ? 'Continue' : 'Select a duration'}
+          Continue
         </button>
       </div>
     </div>
@@ -174,6 +174,75 @@ function BlockConfirmation({ target, durationHours, mutualCount, onConfirm, load
 function BlockSuccess({ expiresAt, durationHours, targetUsername }:
   { expiresAt: string; durationHours: number; targetUsername: string }) {
   const router = useRouter()
+  const supabase = createClient()
+  const [expired, setExpired] = useState(() => new Date(expiresAt) <= new Date())
+  const [userEmail, setUserEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [pwError, setPwError] = useState('')
+  const [pwLoading, setPwLoading] = useState(false)
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) setUserEmail(user.email)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (new Date(expiresAt) <= new Date()) { setExpired(true); return }
+    const ms = new Date(expiresAt).getTime() - Date.now()
+    const t = setTimeout(() => setExpired(true), ms)
+    return () => clearTimeout(t)
+  }, [expiresAt])
+
+  async function handleReconnect() {
+    if (!userEmail || !password) return
+    setPwLoading(true)
+    setPwError('')
+    const { error } = await supabase.auth.signInWithPassword({ email: userEmail, password })
+    setPwLoading(false)
+    if (error) {
+      setPwError('Wrong password. Try again.')
+      return
+    }
+    router.push(`/${targetUsername}`)
+  }
+
+  if (expired) {
+    return (
+      <div className="flex flex-col flex-1 animate-fade-in">
+        <div className="flex-1 px-6 pt-10 flex flex-col">
+          <h2 className="text-3xl font-semibold leading-tight mb-3" style={{ letterSpacing: '-0.02em' }}>
+            Your break has ended.
+          </h2>
+          <p className="text-dim text-sm mb-8 leading-relaxed">
+            To reconnect with @{targetUsername}, enter your password. This confirms it's your decision.
+          </p>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            className="w-full text-white text-sm outline-none"
+            style={{ background: '#111', border: '1px solid #222', borderRadius: 12, padding: '14px 16px' }}
+          />
+          {pwError && <p className="text-red-400 text-sm px-1 mt-2">{pwError}</p>}
+        </div>
+        <div className="px-6 pb-8 pt-6 flex flex-col gap-3">
+          <button onClick={handleReconnect} disabled={pwLoading || !password}
+            className="w-full py-4 font-semibold text-sm transition-all active:scale-[0.98] disabled:opacity-40"
+            style={{ background: '#fff', color: '#0a0a0a', borderRadius: 16 }}>
+            {pwLoading ? 'Reconnecting…' : 'Reconnect'}
+          </button>
+          <button onClick={() => router.push(`/block/${targetUsername}`)}
+            className="w-full py-4 font-semibold text-sm"
+            style={{ background: 'transparent', color: '#555', border: '1px solid #222', borderRadius: 16 }}>
+            Step away again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col flex-1 animate-fade-in">
       <div className="flex-1 px-6 pt-10 flex flex-col justify-between">
@@ -193,6 +262,9 @@ function BlockSuccess({ expiresAt, durationHours, targetUsername }:
               Lifts {formatLiftDateShort(expiresAt)} · {formatDurationLabel(durationHours)} total
             </p>
           </div>
+          <p className="text-muted text-xs mt-6 leading-relaxed">
+            Your break lifts on {formatLiftDate(expiresAt)}. When it does, you'll be asked to confirm before reconnecting.
+          </p>
         </div>
         <p className="text-muted text-xs text-center leading-relaxed pb-2">
           No action needed when it expires. The block lifts automatically.
@@ -289,8 +361,10 @@ export default function BlockPage({ params }: { params: Promise<{ username: stri
   }
 
   function goBack() {
+    if (step === 'success') { router.back(); return }
+    if (step === 'confirm' && mutuals.length === 0) { setStep('duration'); return }
     const idx = STEP_ORDER.indexOf(step)
-    if (idx > 0 && step !== 'success') setStep(STEP_ORDER[idx - 1])
+    if (idx > 0) setStep(STEP_ORDER[idx - 1])
     else router.back()
   }
 

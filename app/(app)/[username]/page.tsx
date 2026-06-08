@@ -8,6 +8,8 @@ import ProfileActions from './ProfileActions'
 import { formatRelativeTime } from '@/lib/utils'
 import { Profile, Post, TempBlock } from '@/types'
 
+type ModalUser = Profile & { followedByMe: boolean }
+
 export default function ProfilePage() {
   const { username } = useParams<{ username: string }>()
   const router = useRouter()
@@ -19,6 +21,9 @@ export default function ProfilePage() {
   const [followerCount, setFollowerCount] = useState(0)
   const [followingCount, setFollowingCount] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [modal, setModal] = useState<'followers' | 'following' | null>(null)
+  const [modalUsers, setModalUsers] = useState<ModalUser[]>([])
+  const [modalLoading, setModalLoading] = useState(false)
 
   useEffect(() => {
     async function load() {
@@ -54,6 +59,31 @@ export default function ProfilePage() {
     }
     load()
   }, [username])
+
+  async function openModal(type: 'followers' | 'following') {
+    if (!profile) return
+    setModal(type)
+    setModalUsers([])
+    setModalLoading(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setModalLoading(false); return }
+
+    const idCol = type === 'followers' ? 'follower_id' : 'following_id'
+    const filterCol = type === 'followers' ? 'following_id' : 'follower_id'
+    const { data: rows } = await supabase.from('follows').select(idCol).eq(filterCol, profile.id)
+    const ids = (rows ?? []).map((r: Record<string, string>) => r[idCol])
+
+    if (ids.length === 0) { setModalLoading(false); return }
+
+    const [{ data: profiles }, { data: myFollows }] = await Promise.all([
+      supabase.from('profiles').select('*').in('id', ids),
+      supabase.from('follows').select('following_id').eq('follower_id', user.id).in('following_id', ids),
+    ])
+    const followedSet = new Set((myFollows ?? []).map((r: { following_id: string }) => r.following_id))
+    setModalUsers((profiles ?? []).map((p: Profile) => ({ ...p, followedByMe: followedSet.has(p.id) })))
+    setModalLoading(false)
+  }
 
   if (loading) {
     return (
@@ -94,7 +124,10 @@ export default function ProfilePage() {
               username={profile.username}
               isFollowing={isFollowing}
               activeBlock={activeBlock}
-              onFollowChange={setIsFollowing}
+              onFollowChange={(following) => {
+                setIsFollowing(following)
+                setFollowerCount(c => following ? c + 1 : c - 1)
+              }}
             />
           )}
         </div>
@@ -104,14 +137,14 @@ export default function ProfilePage() {
         <p className="text-dim text-sm">@{profile.username}</p>
         {profile.bio && <p className="text-white text-sm mt-3 leading-relaxed">{profile.bio}</p>}
         <div className="flex gap-5 mt-4">
-          <div>
+          <button onClick={() => openModal('followers')} className="text-left">
             <span className="text-white text-sm font-semibold">{followerCount}</span>
             <span className="text-dim text-sm ml-1.5">followers</span>
-          </div>
-          <div>
+          </button>
+          <button onClick={() => openModal('following')} className="text-left">
             <span className="text-white text-sm font-semibold">{followingCount}</span>
             <span className="text-dim text-sm ml-1.5">following</span>
-          </div>
+          </button>
         </div>
       </div>
 
@@ -140,6 +173,46 @@ export default function ProfilePage() {
           ))
         )}
       </div>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center"
+          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setModal(null)}>
+          <div className="w-full max-w-md rounded-t-3xl overflow-hidden"
+            style={{ background: '#0f0f0f', border: '1px solid #1a1a1a', maxHeight: '70vh' }}
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid #1a1a1a' }}>
+              <span className="text-white text-sm font-semibold capitalize">{modal}</span>
+              <button onClick={() => setModal(null)} className="text-dim text-sm">Done</button>
+            </div>
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(70vh - 57px)' }}>
+              {modalLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="w-6 h-6 rounded-full animate-pulse" style={{ background: '#222' }} />
+                </div>
+              ) : modalUsers.length === 0 ? (
+                <div className="flex items-center justify-center py-12">
+                  <p className="text-dim text-sm">Nobody here yet.</p>
+                </div>
+              ) : modalUsers.map((u) => (
+                <button key={u.id} onClick={() => { setModal(null); router.push(`/${u.username}`) }}
+                  className="w-full flex items-center gap-3 px-5 py-3 text-left"
+                  style={{ borderBottom: '1px solid #111' }}>
+                  <Avatar name={u.display_name ?? u.username} src={u.avatar_url} size={38} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{u.display_name ?? u.username}</p>
+                    <p className="text-dim text-xs">@{u.username}</p>
+                  </div>
+                  {u.followedByMe && (
+                    <span className="text-xs px-2.5 py-1 rounded-full flex-shrink-0"
+                      style={{ border: '1px solid #333', color: '#888' }}>Following</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

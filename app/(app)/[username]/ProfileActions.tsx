@@ -22,16 +22,23 @@ export default function ProfileActions({ profileId, username, isFollowing, activ
     setLoading(true)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!user) { setLoading(false); return }
 
+    const newFollowing = !following
+    setFollowing(newFollowing)
+    onFollowChange(newFollowing)
+
+    let error
     if (following) {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', profileId)
+      ;({ error } = await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', profileId))
     } else {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: profileId })
+      ;({ error } = await supabase.from('follows').insert({ follower_id: user.id, following_id: profileId }))
     }
-
-    setFollowing((prev) => !prev)
-    onFollowChange(!following)
+    if (error) {
+      console.error('follow error', error)
+      setFollowing(following)
+      onFollowChange(following)
+    }
     setLoading(false)
   }
 

@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Avatar from '@/components/ui/Avatar'
 import { formatRelativeTime } from '@/lib/utils'
@@ -61,9 +62,43 @@ function PostComposer({ profile, onPost }: { profile: Profile; onPost: (c: strin
 }
 
 export default function HomePage() {
+  const router = useRouter()
   const [posts, setPosts] = useState<Post[]>([])
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Profile[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([])
+      setSearchOpen(false)
+      return
+    }
+    const supabase = createClient()
+    supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url')
+      .ilike('username', `%${searchQuery.trim()}%`)
+      .limit(5)
+      .then(({ data }) => {
+        setSearchResults((data as Profile[]) ?? [])
+        setSearchOpen(true)
+      })
+  }, [searchQuery])
 
   useEffect(() => {
     async function load() {
@@ -98,6 +133,32 @@ export default function HomePage() {
       <div className="sticky top-0 z-10 px-5 py-4 flex items-center"
         style={{ background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #1a1a1a' }}>
         <span className="text-xl font-display font-medium" style={{ letterSpacing: '-0.03em' }}>a<em>ll</em>ey</span>
+      </div>
+
+      <div ref={searchRef} className="relative px-4 py-3" style={{ borderBottom: '1px solid #1a1a1a' }}>
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search people…"
+          className="w-full text-white text-sm placeholder-[#555] outline-none px-4 py-2.5 rounded-full"
+          style={{ background: '#111', border: '1px solid #222' }}
+        />
+        {searchOpen && searchResults.length > 0 && (
+          <div className="absolute left-4 right-4 z-50 rounded-2xl overflow-hidden"
+            style={{ top: 'calc(100% - 4px)', background: '#111', border: '1px solid #222' }}>
+            {searchResults.map((p) => (
+              <button key={p.id} onClick={() => { setSearchOpen(false); setSearchQuery(''); router.push(`/${p.username}`) }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                style={{ borderBottom: '1px solid #1a1a1a' }}>
+                <Avatar name={p.display_name ?? p.username} src={p.avatar_url} size={36} />
+                <div>
+                  <p className="text-white text-sm font-medium">{p.display_name ?? p.username}</p>
+                  <p className="text-dim text-xs">@{p.username}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {profile && <PostComposer profile={profile} onPost={handlePost} />}
